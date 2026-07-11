@@ -69,10 +69,11 @@ async def plan_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await edit_or_reply(update, text, InlineKeyboardMarkup(keyboard))
 
 async def price_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = (
+   text = (
         "💵 *Discounted Pricing*\n\n"
-        "• *Official FXReplay Pro:* $35/month\n"
-        f"• *Our Offer:* **${UNIT_PRICE:.2f}/month** (Save 50%!)\n\n"
+        "• *Official FXReplay Pro:* $30 / month\n"
+        "                                            $5 / 5 days\n\n"
+        f"• *Our Price:* **${UNIT_PRICE:.1f} / 5 days**\n\n"
         "Need multiple accounts? Tap **Buy Now** to start checkout."
     )
     keyboard = [
