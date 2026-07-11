@@ -109,7 +109,30 @@ async def start_buy(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     return SELECT_QUANTITY
 
+import urllib.request
+import json
+
+def get_live_prices():
+    """Fetches live USD prices for LTC and SOL from Binance Public API."""
+    try:
+        # Fetch Litecoin Price
+        req_ltc = urllib.request.Request("https://api.binance.com/api/v3/ticker/price?symbol=LTCUSDT", headers={'User-Agent': 'Mozilla/5.0'})
+        ltc_data = json.loads(urllib.request.urlopen(req_ltc, timeout=5).read())
+        ltc_price = float(ltc_data['price'])
+
+        # Fetch Solana Price
+        req_sol = urllib.request.Request("https://api.binance.com/api/v3/ticker/price?symbol=SOLUSDT", headers={'User-Agent': 'Mozilla/5.0'})
+        sol_data = json.loads(urllib.request.urlopen(req_sol, timeout=5).read())
+        sol_price = float(sol_data['price'])
+
+        return ltc_price, sol_price
+    except Exception as e:
+        logging.error(f"Error fetching live prices: {e}")
+        return None, None
+
+
 async def quantity_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Step 2: Saves quantity and displays dynamic crypto amounts based on live prices."""
     query = update.callback_query
     await query.answer()
     
@@ -119,14 +142,29 @@ async def quantity_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["quantity"] = qty
     context.user_data["total_usd"] = total_usd
     
+    # Fetch live exchange rates
+    ltc_rate, sol_rate = get_live_prices()
+    
+    # Calculate crypto amounts
+    if ltc_rate and sol_rate:
+        ltc_amount = total_usd / ltc_rate
+        sol_amount = total_usd / sol_rate
+        
+        ltc_text = f"🪙 *Litecoin (LTC):* Send `{ltc_amount:.4f} LTC` (~${total_usd:.2f})\n`{LTC_WALLET}`"
+        sol_text = f"🪙 *Solana (SOL):* Send `{sol_amount:.4f} SOL` (~${total_usd:.2f})\n`{SOL_WALLET}`"
+    else:
+        # Fallback if API is temporarily unreachable
+        ltc_text = f"🪙 *Litecoin (LTC):*\n`{LTC_WALLET}`"
+        sol_text = f"🪙 *Solana (SOL):*\n`{SOL_WALLET}`"
+
     text = (
         f"⚡ *Checkout - Step 2/2 (Payment)*\n\n"
         f"• *Quantity:* {qty} Account(s)\n"
         f"• *Total Due:* **${total_usd:.2f} USD**\n\n"
-        f"Please send **${total_usd:.2f} USD** to one of our official wallet addresses below:\n\n"
-        f"🪙 *Litecoin (LTC):*\n`{LTC_WALLET}`\n\n"
-        f"🪙 *Solana (SOL):*\n`{SOL_WALLET}`\n\n"
-        f"⚠️ *Note:* Tap any address above to copy it instantly. After making the deposit, tap **I Have Paid** below."
+        f"Please transfer your calculated crypto amount to one of the wallets below:\n\n"
+        f"{ltc_text}\n\n"
+        f"{sol_text}\n\n"
+        f"⚠️ *Note:* Tap any address or crypto amount above to copy it instantly. After making the deposit, tap **I Have Paid** below."
     )
     
     keyboard = [
