@@ -1,5 +1,6 @@
 import os
 import logging
+from aiocryptopay import AioCryptoPay, Networks
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
@@ -13,25 +14,26 @@ from telegram.ext import (
 logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
 
 # Define Conversation States
-SELECT_QUANTITY, SELECT_COIN, CONFIRM_PAYMENT = range(3)
+SELECT_QUANTITY, SELECT_METHOD, CRYPTOBOT_FLOW, MANUAL_FLOW = range(4)
 
 # Base price per plan unit in USD
 UNIT_PRICE = 18  
 
-# --- WALLET CONFIGURATION ---
-# (You can also set these inside Railway Environment Variables)
-USDT_TRC20 = os.getenv("USDT_TRC20", "Your_USDT_TRC20_Wallet_Address_Here")
-BTC_WALLET = os.getenv("BTC_WALLET", "Your_Bitcoin_Wallet_Address_Here")
+# --- ENVIRONMENT VARIABLES & WALLETS ---
+CRYPTO_TOKEN = os.getenv("CRYPTO_PAY_TOKEN")
+crypto = AioCryptoPay(token=CRYPTO_TOKEN, network=Networks.MAIN_NET) if CRYPTO_TOKEN else None
+
 LTC_WALLET = os.getenv("LTC_WALLET", "Your_Litecoin_Wallet_Address_Here")
+SOL_WALLET = os.getenv("SOL_WALLET", "Your_Solana_Wallet_Address_Here")
 
 # --- COMMAND HANDLERS ---
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Main landing menu with quick commands."""
+    """Main landing menu with quick navigation buttons."""
     welcome_text = (
         "🚀 *Welcome to the FXReplay Pro Sales Bot!*\n\n"
         "Get instant access to FXReplay Pro accounts at discounted rates.\n"
-        "Select an option below to get started or buy directly:"
+        "Select an option below to navigate or tap **Buy Now** to place an order:"
     )
     
     keyboard = [
@@ -57,25 +59,25 @@ async def plan_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• Built-in Prop Firm Challenge Simulator\n"
         "• Mentor AI & Advanced Analytics\n"
     )
-    await send_or_edit(update, text)
+    await send_or_reply(update, text)
 
 async def price_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
         "💵 *Discounted Pricing*\n\n"
         f"• *Official FXReplay Pro:* $35/month\n"
         f"• *Our Offer:* **${UNIT_PRICE}/month** (Save 50%!)\n\n"
-        "Need multiple accounts? Click **Buy Now** to select quantity."
+        "Need multiple accounts? Tap **Buy Now** to choose your quantity."
     )
-    await send_or_edit(update, text)
+    await send_or_reply(update, text)
 
 async def delivery_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
         "🚚 *Delivery Mode & Warranty*\n\n"
-        "• *Speed:* Credentials delivered within 5–15 mins after admin payment verification.\n"
+        "• *Speed:* Credentials delivered within 5–15 mins after payment verification.\n"
         "• *Format:* Private Email + Password details sent directly to your Telegram chat.\n"
-        "• *Warranty:* Full replacement guarantee for the length of your subscription."
+        "• *Warranty:* Full replacement guarantee for the duration of your active plan."
     )
-    await send_or_edit(update, text)
+    await send_or_reply(update, text)
 
 # --- CHECKOUT CONVERSATION FLOW ---
 
@@ -99,14 +101,13 @@ async def start_buy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return SELECT_QUANTITY
 
 async def quantity_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Step 2: Save quantity and choose Crypto Wallet."""
+    """Step 2: Save quantity and present payment method choices."""
     query = update.callback_query
     await query.answer()
     
     qty = int(query.data.split("_")[1])
     total_usd = qty * UNIT_PRICE
     
-    # Store order info in context memory
     context.user_data["quantity"] = qty
     context.user_data["total_usd"] = total_usd
     
@@ -114,80 +115,152 @@ async def quantity_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"💳 *Checkout - Step 2/3*\n\n"
         f"• *Quantity:* {qty} Account(s)\n"
         f"• *Total Due:* **${total_usd} USD**\n\n"
-        f"Select your preferred cryptocurrency to pay:"
+        f"Select your preferred payment gateway:"
     )
     
     keyboard = [
-        [InlineKeyboardButton("USDT (TRC20)", callback_data="coin_USDT")],
-        [InlineKeyboardButton("Bitcoin (BTC)", callback_data="coin_BTC"), InlineKeyboardButton("Litecoin (LTC)", callback_data="coin_LTC")],
+        [InlineKeyboardButton("🤖 Pay via Crypto Bot (@CryptoBot)", callback_data="method_cryptobot")],
+        [InlineKeyboardButton("✋ Pay Manually to Wallet (LTC / SOL)", callback_data="method_manual")],
         [InlineKeyboardButton("❌ Cancel Order", callback_data="cancel_order")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await query.message.reply_text(text, parse_mode="Markdown", reply_markup=reply_markup)
-    return SELECT_COIN
+    return SELECT_METHOD
 
-async def coin_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Step 3: Show wallet address and present payment confirmation button."""
+# --- OPTION A: CRYPTO BOT API FLOW ---
+
+async def cryptobot_flow(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     
-    coin = query.data.split("_")[1]
-    context.user_data["coin"] = coin
+    if not crypto:
+        await query.message.reply_text("⚠️ Crypto Bot API Token is missing in Railway variables! Please select manual payment.")
+        return SELECT_METHOD
+
+    total_usd = context.user_data.get("total_usd", 18)
+    qty = context.user_data.get("quantity", 1)
     
-    qty = context.user_data["quantity"]
-    total_usd = context.user_data["total_usd"]
+    # Create invoice via Crypto Bot API
+    try:
+        invoice = await crypto.create_invoice(
+            asset="USDT",  # Base currency parameter
+            amount=total_usd,
+            description=f"Purchase of {qty} FXReplay Pro Account(s)",
+            payload=f"user_{query.from_user.id}"
+        )
+        context.user_data["invoice_id"] = invoice.invoice_id
+        
+        text = (
+            f"⚡ *Crypto Bot Payment Invoice Created!*\n\n"
+            f"• *Amount Due:* **${total_usd} USD**\n"
+            f"• *Invoice ID:* `{invoice.invoice_id}`\n\n"
+            f"Tap the button below to complete payment inside Telegram using `@CryptoBot`.\n"
+            f"Once complete, tap **Check Payment Status** below."
+        )
+        
+        keyboard = [
+            [InlineKeyboardButton("💳 Pay via @CryptoBot", url=invoice.bot_invoice_url)],
+            [InlineKeyboardButton("🔍 Check Payment Status", callback_data="check_crypto_status")],
+            [InlineKeyboardButton("❌ Cancel Order", callback_data="cancel_order")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.message.reply_text(text, parse_mode="Markdown", reply_markup=reply_markup)
+        return CRYPTOBOT_FLOW
+    except Exception as e:
+        logging.error(f"Crypto Bot Invoice Error: {e}")
+        await query.message.reply_text("❌ Failed to generate Crypto Bot invoice. Please try Manual Wallet Payment.")
+        return SELECT_METHOD
+
+async def check_crypto_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
     
-    wallet_address = USDT_TRC20 if coin == "USDT" else (BTC_WALLET if coin == "BTC" else LTC_WALLET)
+    invoice_id = context.user_data.get("invoice_id")
+    if not invoice_id or not crypto:
+        await query.message.reply_text("❌ Active invoice not found.")
+        return CRYPTOBOT_FLOW
+
+    invoices = await crypto.get_invoices(invoice_ids=invoice_id)
+    if invoices and invoices[0].status == "paid":
+        user = query.from_user
+        username = f"@{user.username}" if user.username else "No Username"
+        qty = context.user_data.get("quantity", 1)
+        total_usd = context.user_data.get("total_usd", 18)
+        
+        await query.message.reply_text(
+            "🎉 *Payment Verified Successfully!*\n\n"
+            "Your order has been recorded. Our admin team will deliver your credentials in this chat shortly.",
+            parse_mode="Markdown"
+        )
+        
+        ADMIN_ID = os.getenv("ADMIN_ID")
+        if ADMIN_ID:
+            alert = (
+                "🚨 *AUTOMATED PAYMENT RECEIVED (CRYPTO BOT)!* 🚨\n\n"
+                f"👤 *Customer:* {username} (ID: `{user.id}`)\n"
+                f"📦 *Quantity:* {qty} Account(s)\n"
+                f"💰 *Amount Paid:* ${total_usd} USD\n"
+                f"🧾 *Invoice ID:* `{invoice_id}`\n\n"
+                f"👉 DM User: [{user.first_name}](tg://user?id={user.id})"
+            )
+            await context.bot.send_message(chat_id=int(ADMIN_ID), text=alert, parse_mode="Markdown")
+            
+        return ConversationHandler.END
+    else:
+        await query.message.reply_text("⏳ Payment not detected yet. Complete the payment in @CryptoBot and tap check status again.")
+        return CRYPTOBOT_FLOW
+
+# --- OPTION B: MANUAL WALLET PAYMENT FLOW ---
+
+async def manual_flow(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    total_usd = context.user_data.get("total_usd", 18)
     
     text = (
-        f"⚡ *Payment Instructions - Step 3/3*\n\n"
-        f"Please send **${total_usd} USD** equivalent of **{coin}** to the address below:\n\n"
-        f"📌 *{coin} Wallet Address:*\n`{wallet_address}`\n\n"
-        f"⚠️ *Important:* After sending payment, tap the **I Have Paid** button below to notify our admin team immediately."
+        f"⚡ *Manual Direct Wallet Payment*\n\n"
+        f"Please send **${total_usd} USD** to one of our official wallet addresses below:\n\n"
+        f"🪙 *Litecoin (LTC):*\n`{LTC_WALLET}`\n\n"
+        f"🪙 *Solana (SOL):*\n`{SOL_WALLET}`\n\n"
+        f"⚠️ *Note:* Tap any address above to copy it instantly. After making the deposit, tap **I Have Paid** below."
     )
     
     keyboard = [
-        [InlineKeyboardButton("✅ I Have Paid", callback_data="confirm_paid")],
+        [InlineKeyboardButton("✅ I Have Paid", callback_data="confirm_manual_paid")],
         [InlineKeyboardButton("❌ Cancel Order", callback_data="cancel_order")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await query.message.reply_text(text, parse_mode="Markdown", reply_markup=reply_markup)
-    return CONFIRM_PAYMENT
+    return MANUAL_FLOW
 
-async def payment_confirmed(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Final Step: Notify User and Alert Admin instantly."""
+async def manual_payment_confirmed(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     
     user = query.from_user
     username = f"@{user.username}" if user.username else "No Username"
-    user_id = user.id
-    
     qty = context.user_data.get("quantity", 1)
     total_usd = context.user_data.get("total_usd", 18)
-    coin = context.user_data.get("coin", "USDT")
     
-    # 1. Message sent to Customer
     await query.message.reply_text(
-        "🎉 *Payment Notification Submitted!*\n\n"
+        "🎉 *Manual Payment Notification Submitted!*\n\n"
         "Our admin team has been notified. Once confirmed on the blockchain, your account credentials "
-        "will be delivered right here in this chat.\n\n"
-        "If you have transaction screenshots, you can also send them directly to our support agent.",
+        "will be delivered right here in this chat.",
         parse_mode="Markdown"
     )
     
-    # 2. Alert sent to ADMIN via Telegram
     ADMIN_ID = os.getenv("ADMIN_ID")
     if ADMIN_ID:
         admin_alert_text = (
-            "🚨 *NEW ORDER PAYMENT ALERT!* 🚨\n\n"
-            f"👤 *Customer:* {username} (ID: `{user_id}`)\n"
+            "🚨 *NEW MANUAL PAYMENT ALERT!* 🚨\n\n"
+            f"👤 *Customer:* {username} (ID: `{user.id}`)\n"
             f"📦 *Quantity:* {qty} FXReplay Account(s)\n"
             f"💰 *Amount Due:* ${total_usd} USD\n"
-            f"🪙 *Coin Chosen:* {coin}\n\n"
-            f"👉 *Action Required:* Check blockchain, then DM user: [{user.first_name}](tg://user?id={user_id})"
+            f"💳 *Method:* Manual Wallet Transfer (LTC / SOL)\n\n"
+            f"👉 *Action Required:* Verify on blockchain and DM user: [{user.first_name}](tg://user?id={user.id})"
         )
         try:
             await context.bot.send_message(chat_id=int(ADMIN_ID), text=admin_alert_text, parse_mode="Markdown")
@@ -197,7 +270,6 @@ async def payment_confirmed(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 async def cancel_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Cancels checkout flow."""
     query = update.callback_query
     await query.answer()
     await query.message.reply_text("❌ Order cancelled. Type /start anytime to return to the main menu.")
@@ -205,7 +277,7 @@ async def cancel_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # --- UTILITIES ---
 
-async def send_or_edit(update: Update, text: str):
+async def send_or_reply(update: Update, text: str):
     if update.callback_query:
         await update.callback_query.answer()
         await update.callback_query.message.reply_text(text, parse_mode="Markdown")
@@ -221,7 +293,7 @@ def main():
 
     app = Application.builder().token(BOT_TOKEN).build()
 
-    # Conversation Handler for Interactive Checkout
+    # Conversation Handler for Dual-Method Checkout
     buy_conv = ConversationHandler(
         entry_points=[
             CommandHandler("buy", start_buy),
@@ -229,13 +301,17 @@ def main():
         ],
         states={
             SELECT_QUANTITY: [CallbackQueryHandler(quantity_selected, pattern="^qty_")],
-            SELECT_COIN: [CallbackQueryHandler(coin_selected, pattern="^coin_")],
-            CONFIRM_PAYMENT: [CallbackQueryHandler(payment_confirmed, pattern="^confirm_paid$")]
+            SELECT_METHOD: [
+                CallbackQueryHandler(cryptobot_flow, pattern="^method_cryptobot$"),
+                CallbackQueryHandler(manual_flow, pattern="^method_manual$")
+            ],
+            CRYPTOBOT_FLOW: [CallbackQueryHandler(check_crypto_status, pattern="^check_crypto_status$")],
+            MANUAL_FLOW: [CallbackQueryHandler(manual_payment_confirmed, pattern="^confirm_manual_paid$")]
         },
         fallbacks=[CallbackQueryHandler(cancel_order, pattern="^cancel_order$")]
     )
 
-    # General Command Handlers
+    # Command Handlers
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("plan", plan_details))
     app.add_handler(CommandHandler("price", price_details))
@@ -245,10 +321,9 @@ def main():
     app.add_handler(CallbackQueryHandler(price_details, pattern="^cmd_price$"))
     app.add_handler(CallbackQueryHandler(delivery_mode, pattern="^cmd_delivery$"))
     
-    # Add Checkout Handler
     app.add_handler(buy_conv)
 
-    print("🤖 FXReplay Checkout Bot with Admin Alerts is Online...")
+    print("🤖 FXReplay Sales Bot with Dual Crypto Gateways is Online...")
     app.run_polling()
 
 if __name__ == "__main__":
