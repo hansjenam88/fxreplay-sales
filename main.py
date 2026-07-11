@@ -67,6 +67,10 @@ async def edit_or_reply(update: Update, text: str, reply_markup: InlineKeyboardM
 # --- MAIN NAVIGATION COMMANDS ---
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Resets any existing conversation state and displays main landing menu."""
+    # Reset checkout conversation state if user restarts
+    context.user_data.clear()
+    
     welcome_text = (
         "🚀 *Welcome to the FXReplay Pro Sales Bot!*\n\n"
         "Get instant access to FXReplay Pro accounts at discounted rates.\n"
@@ -80,6 +84,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     await edit_or_reply(update, welcome_text, reply_markup)
+    return ConversationHandler.END
 
 async def plan_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (
@@ -121,6 +126,8 @@ async def delivery_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # --- CHECKOUT FLOW ---
 
 async def start_buy(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Clears previous cart state and starts fresh checkout."""
+    context.user_data.clear()
     p = UNIT_PRICE
     text = "🛒 *Checkout - Step 1/2*\n\nHow many FXReplay Pro accounts would you like to purchase?"
     
@@ -294,9 +301,11 @@ def main():
             MANUAL_FLOW: [CallbackQueryHandler(manual_payment_confirmed, pattern="^confirm_manual_paid$")]
         },
         fallbacks=[
+            CommandHandler("start", start),
             CallbackQueryHandler(cancel_order, pattern="^cancel_order$"),
             CallbackQueryHandler(start, pattern="^cmd_start$")
-        ]
+        ],
+        per_message=False  # Ties conversation state cleanly to user ID
     )
 
     # Command Handlers
@@ -313,7 +322,7 @@ def main():
     
     app.add_handler(buy_conv)
 
-    print("🤖 FXReplay Sales Bot with Real-time Crypto Calculations Online...")
+    print("🤖 FXReplay Sales Bot with Resolved Hanging Button States Online...")
     app.run_polling()
 
 if __name__ == "__main__":
