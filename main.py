@@ -216,7 +216,7 @@ async def deliver_credentials(update: Update, context: ContextTypes.DEFAULT_TYPE
         "Thank you for your purchase. Here are your account login details:\n\n"
         f"📩 *Email:* `{email}`\n"
         f"🔑 *Password:* `{password}`\n\n"
-        "⚠️ *Important:* Please do not change account settings if using a shared plan layout. Enjoy backtesting!"
+        "Enjoy backtesting!"
     )
 
     try:
