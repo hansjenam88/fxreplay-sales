@@ -88,10 +88,9 @@ async def delivery_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [[InlineKeyboardButton("⬅️ Back to Main Menu", callback_data="cmd_start")]]
     await edit_or_reply(update, text, InlineKeyboardMarkup(keyboard))
 
-# --- CHECKOUT FLOW (SPAWNS NEW MESSAGE) ---
+# --- CHECKOUT FLOW ---
 
 async def start_buy(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Step 1: Spawns a NEW stacked message block specifically for Checkout."""
     p = UNIT_PRICE
     text = "🛒 *Checkout - Step 1/2*\n\nHow many FXReplay Pro accounts would you like to purchase?"
     
@@ -111,7 +110,6 @@ async def start_buy(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return SELECT_QUANTITY
 
 async def quantity_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Step 2: Saves quantity and displays payment wallet details directly."""
     query = update.callback_query
     await query.answer()
     
@@ -141,7 +139,6 @@ async def quantity_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return MANUAL_FLOW
 
 async def manual_payment_confirmed(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Final Step: Alerts user and sends notification to Admin."""
     query = update.callback_query
     await query.answer()
     
@@ -161,11 +158,13 @@ async def manual_payment_confirmed(update: Update, context: ContextTypes.DEFAULT
     if ADMIN_ID:
         admin_alert_text = (
             "🚨 *NEW PAYMENT ALERT!* 🚨\n\n"
-            f"👤 *Customer:* {username} (ID: `{user.id}`)\n"
+            f"👤 *Customer:* {username}\n"
+            f"🆔 *User ID:* `{user.id}`\n"
             f"📦 *Quantity:* {qty} FXReplay Account(s)\n"
             f"💰 *Amount Due:* ${total_usd:.2f} USD\n"
             f"💳 *Method:* Manual Wallet Transfer (LTC / SOL)\n\n"
-            f"👉 *Action Required:* Verify on blockchain and DM user: [{user.first_name}](tg://user?id={user.id})"
+            f"⚡ *Quick Deliver Command:*\n"
+            f"`/deliver {user.id} email:password`"
         )
         try:
             await context.bot.send_message(chat_id=int(ADMIN_ID), text=admin_alert_text, parse_mode="Markdown")
@@ -179,6 +178,39 @@ async def cancel_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     await query.edit_message_text("❌ Order cancelled. Type /start anytime to return to the main menu.")
     return ConversationHandler.END
+
+# --- ADMIN CREDENTIAL DELIVERY COMMAND ---
+
+async def deliver_credentials(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Allows Admin to deliver credentials via the bot: /deliver <user_id> <email:password>"""
+    ADMIN_ID = os.getenv("ADMIN_ID")
+    
+    # Check if command is issued by the authorized admin
+    if str(update.effective_user.id) != str(ADMIN_ID):
+        await update.message.reply_text("🚫 Unauthorized command.")
+        return
+
+    # Check if arguments are provided correctly
+    if len(context.args) < 2:
+        await update.message.reply_text("⚠️ Usage: `/deliver <user_id> <login_credentials>`\n\nExample:\n`/deliver 123456789 user@gmail.com:pass123`", parse_mode="Markdown")
+        return
+
+    target_user_id = context.args[0]
+    credentials = " ".join(context.args[1:])
+
+    customer_message = (
+        "🎉 *Your FXReplay Pro Account is Ready!*\n\n"
+        "Thank you for your purchase. Here are your account login details:\n\n"
+        f"🔑 *Credentials:*\n`{credentials}`\n\n"
+        "⚠️ *Important:* Please do not change account settings if using a shared plan layout. Enjoy backtesting!"
+    )
+
+    try:
+        # Send details directly to the customer through the bot
+        await context.bot.send_message(chat_id=int(target_user_id), text=customer_message, parse_mode="Markdown")
+        await update.message.reply_text(f"✅ Credentials successfully sent to User ID `{target_user_id}`!", parse_mode="Markdown")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Failed to deliver message to user `{target_user_id}`.\nError: {e}", parse_mode="Markdown")
 
 # --- MAIN ENGINE ---
 
@@ -209,6 +241,7 @@ def main():
     app.add_handler(CommandHandler("plan", plan_details))
     app.add_handler(CommandHandler("price", price_details))
     app.add_handler(CommandHandler("delivery", delivery_mode))
+    app.add_handler(CommandHandler("deliver", deliver_credentials)) # Admin Delivery Command
     
     app.add_handler(CallbackQueryHandler(start, pattern="^cmd_start$"))
     app.add_handler(CallbackQueryHandler(plan_details, pattern="^cmd_plan$"))
@@ -217,7 +250,7 @@ def main():
     
     app.add_handler(buy_conv)
 
-    print("🤖 Streamlined FXReplay Sales Bot Online...")
+    print("🤖 FXReplay Sales Bot with Direct Admin Dispatch Online...")
     app.run_polling()
 
 if __name__ == "__main__":
