@@ -182,7 +182,7 @@ async def cancel_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # --- ADMIN CREDENTIAL DELIVERY COMMAND ---
 
 async def deliver_credentials(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Allows Admin to deliver credentials via the bot: /deliver <user_id> <email:password>"""
+    """Allows Admin to deliver credentials via the bot: /deliver <user_id> <email:password> or <email password>"""
     ADMIN_ID = os.getenv("ADMIN_ID")
     
     # Check if command is issued by the authorized admin
@@ -192,16 +192,30 @@ async def deliver_credentials(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     # Check if arguments are provided correctly
     if len(context.args) < 2:
-        await update.message.reply_text("⚠️ Usage: `/deliver <user_id> <login_credentials>`\n\nExample:\n`/deliver 123456789 user@gmail.com:pass123`", parse_mode="Markdown")
+        await update.message.reply_text(
+            "⚠️ Usage: `/deliver <user_id> <email:password>` or `/deliver <user_id> <email> <password>`\n\n"
+            "Example:\n`/deliver 123456789 user@gmail.com:pass123`", 
+            parse_mode="Markdown"
+        )
         return
 
     target_user_id = context.args[0]
-    credentials = " ".join(context.args[1:])
+    
+    # Parse credentials whether separated by ':' or space
+    raw_creds = " ".join(context.args[1:])
+    if ":" in raw_creds:
+        parts = raw_creds.split(":", 1)
+        email = parts[0].strip()
+        password = parts[1].strip()
+    else:
+        email = context.args[1].strip()
+        password = context.args[2].strip() if len(context.args) > 2 else "N/A"
 
     customer_message = (
         "🎉 *Your FXReplay Pro Account is Ready!*\n\n"
         "Thank you for your purchase. Here are your account login details:\n\n"
-        f"🔑 *Credentials:*\n`{credentials}`\n\n"
+        f"📩 *Email:* `{email}`\n"
+        f"🔑 *Password:* `{password}`\n\n"
         "⚠️ *Important:* Please do not change account settings if using a shared plan layout. Enjoy backtesting!"
     )
 
