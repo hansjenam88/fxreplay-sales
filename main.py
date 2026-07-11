@@ -17,7 +17,6 @@ logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s
 SELECT_QUANTITY, SELECT_METHOD, CRYPTOBOT_FLOW, MANUAL_FLOW = range(4)
 
 # --- ENVIRONMENT VARIABLES & CONFIGURATION ---
-# Pull unit price dynamically from Railway (Defaults to 18 if variable isn't set)
 UNIT_PRICE = float(os.getenv("UNIT_PRICE", "18"))  
 
 CRYPTO_TOKEN = os.getenv("CRYPTO_PAY_TOKEN")
@@ -26,24 +25,22 @@ crypto = AioCryptoPay(token=CRYPTO_TOKEN, network=Networks.MAIN_NET) if CRYPTO_T
 LTC_WALLET = os.getenv("LTC_WALLET", "Your_Litecoin_Wallet_Address_Here")
 SOL_WALLET = os.getenv("SOL_WALLET", "Your_Solana_Wallet_Address_Here")
 
-# --- HELPER UTILITY FOR CLEAN IN-PLACE EDITING ---
+# --- HELPER UTILITY FOR MAIN MENU NAVIGATION ---
 
 async def edit_or_reply(update: Update, text: str, reply_markup: InlineKeyboardMarkup = None):
-    """Edits current message in-place if triggered via button, avoiding message stacking."""
+    """Edits main menu messages in-place to keep navigation clean."""
     if update.callback_query:
         await update.callback_query.answer()
         try:
             await update.callback_query.edit_message_text(text, parse_mode="Markdown", reply_markup=reply_markup)
         except Exception:
-            # Fallback if text/markup hasn't changed
             pass
     else:
         await update.message.reply_text(text, parse_mode="Markdown", reply_markup=reply_markup)
 
-# --- NAVIGATION COMMANDS ---
+# --- MAIN NAVIGATION COMMANDS ---
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Main menu with in-place UI updating."""
     welcome_text = (
         "🚀 *Welcome to the FXReplay Pro Sales Bot!*\n\n"
         "Get instant access to FXReplay Pro accounts at discounted rates.\n"
@@ -76,7 +73,7 @@ async def price_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "💵 *Discounted Pricing*\n\n"
         "• *Official FXReplay Pro:* $35/month\n"
         f"• *Our Offer:* **${UNIT_PRICE:.2f}/month** (Save 50%!)\n\n"
-        "Need multiple accounts? Tap **Buy Now** to choose your quantity."
+        "Need multiple accounts? Tap **Buy Now** to start checkout."
     )
     keyboard = [
         [InlineKeyboardButton("💳 Buy Now", callback_data="cmd_buy")],
@@ -94,10 +91,10 @@ async def delivery_mode(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [[InlineKeyboardButton("⬅️ Back to Main Menu", callback_data="cmd_start")]]
     await edit_or_reply(update, text, InlineKeyboardMarkup(keyboard))
 
-# --- CHECKOUT CONVERSATION FLOW (NO STACKING) ---
+# --- CHECKOUT FLOW (SPAWNS NEW MESSAGE) ---
 
 async def start_buy(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Step 1: Select Quantity."""
+    """Step 1: Spawns a NEW stacked message block specifically for Checkout."""
     p = UNIT_PRICE
     text = "🛒 *Checkout - Step 1/3*\n\nHow many FXReplay Pro monthly accounts would you like to purchase?"
     
@@ -107,11 +104,18 @@ async def start_buy(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("❌ Cancel Order", callback_data="cancel_order")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await edit_or_reply(update, text, reply_markup)
+    
+    # Send as a brand NEW message instead of editing the menu
+    if update.callback_query:
+        await update.callback_query.answer()
+        await update.callback_query.message.reply_text(text, parse_mode="Markdown", reply_markup=reply_markup)
+    else:
+        await update.message.reply_text(text, parse_mode="Markdown", reply_markup=reply_markup)
+        
     return SELECT_QUANTITY
 
 async def quantity_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Step 2: Save quantity and select payment gateway."""
+    """Step 2: Updates the Checkout card in-place for steps 2 & 3."""
     query = update.callback_query
     await query.answer()
     
@@ -183,15 +187,15 @@ async def cryptobot_flow(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def check_crypto_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
     
     invoice_id = context.user_data.get("invoice_id")
     if not invoice_id or not crypto:
-        await query.edit_message_text("❌ Active invoice not found.")
+        await query.answer("❌ Active invoice not found.", show_alert=True)
         return CRYPTOBOT_FLOW
 
     invoices = await crypto.get_invoices(invoice_ids=invoice_id)
     if invoices and invoices[0].status == "paid":
+        await query.answer()
         user = query.from_user
         username = f"@{user.username}" if user.username else "No Username"
         qty = context.user_data.get("quantity", 1)
@@ -217,7 +221,7 @@ async def check_crypto_status(update: Update, context: ContextTypes.DEFAULT_TYPE
             
         return ConversationHandler.END
     else:
-        await query.answer("⏳ Payment not detected yet. Complete the invoice in @CryptoBot and try again.", show_alert=True)
+        await query.answer("⏳ Payment not detected yet. Complete the payment in @CryptoBot first!", show_alert=True)
         return CRYPTOBOT_FLOW
 
 # --- OPTION B: MANUAL WALLET PAYMENT FLOW ---
@@ -293,7 +297,6 @@ def main():
 
     app = Application.builder().token(BOT_TOKEN).build()
 
-    # Conversation Handler for Clean Checkout
     buy_conv = ConversationHandler(
         entry_points=[
             CommandHandler("buy", start_buy),
@@ -327,7 +330,7 @@ def main():
     
     app.add_handler(buy_conv)
 
-    print("🤖 Clean FXReplay Sales Bot Online...")
+    print("🤖 FXReplay Bot Online...")
     app.run_polling()
 
 if __name__ == "__main__":
