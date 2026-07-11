@@ -109,7 +109,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def main():
     # Reads token safely from environment variables
-    BOT_TOKEN = os.getenv("8612352765:AAFeD_hRqZyMuUHRyiTVn4sJYZIIhCZkh4M")
+    BOT_TOKEN = os.getenv("BOT_TOKEN")
     if not BOT_TOKEN:
         raise ValueError("BOT_TOKEN environment variable not set!")
 
