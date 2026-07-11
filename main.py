@@ -1,5 +1,6 @@
 import os
 import logging
+import requests
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
@@ -20,6 +21,35 @@ UNIT_PRICE = float(os.getenv("UNIT_PRICE", "1.5"))
 
 LTC_WALLET = os.getenv("LTC_WALLET", "Your_Litecoin_Wallet_Address_Here")
 SOL_WALLET = os.getenv("SOL_WALLET", "Your_Solana_Wallet_Address_Here")
+
+# --- LIVE PRICE FETCHING UTILITY ---
+
+def get_crypto_price(symbol: str):
+    """Fetches real-time price from Binance or CoinGecko fallback using a desktop User-Agent."""
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+    
+    # Primary Source: Binance API
+    try:
+        url = f"https://api.binance.com/api/v3/ticker/price?symbol={symbol}USDT"
+        response = requests.get(url, headers=headers, timeout=5)
+        if response.status_code == 200:
+            return float(response.json()['price'])
+    except Exception as e:
+        logging.warning(f"Binance API failed for {symbol}: {e}")
+        
+    # Backup Source: CoinGecko API
+    try:
+        coin_map = {"LTC": "litecoin", "SOL": "solana"}
+        coin_id = coin_map.get(symbol)
+        if coin_id:
+            url = f"https://api.coingecko.com/api/v3/simple/price?ids={coin_id}&vs_currencies=usd"
+            response = requests.get(url, headers=headers, timeout=5)
+            if response.status_code == 200:
+                return float(response.json()[coin_id]['usd'])
+    except Exception as e:
+        logging.warning(f"CoinGecko API failed for {symbol}: {e}")
+
+    return None
 
 # --- HELPER UTILITY FOR MAIN MENU NAVIGATION ---
 
@@ -109,30 +139,8 @@ async def start_buy(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     return SELECT_QUANTITY
 
-import urllib.request
-import json
-
-def get_live_prices():
-    """Fetches live USD prices for LTC and SOL from Binance Public API."""
-    try:
-        # Fetch Litecoin Price
-        req_ltc = urllib.request.Request("https://api.binance.com/api/v3/ticker/price?symbol=LTCUSDT", headers={'User-Agent': 'Mozilla/5.0'})
-        ltc_data = json.loads(urllib.request.urlopen(req_ltc, timeout=5).read())
-        ltc_price = float(ltc_data['price'])
-
-        # Fetch Solana Price
-        req_sol = urllib.request.Request("https://api.binance.com/api/v3/ticker/price?symbol=SOLUSDT", headers={'User-Agent': 'Mozilla/5.0'})
-        sol_data = json.loads(urllib.request.urlopen(req_sol, timeout=5).read())
-        sol_price = float(sol_data['price'])
-
-        return ltc_price, sol_price
-    except Exception as e:
-        logging.error(f"Error fetching live prices: {e}")
-        return None, None
-
-
 async def quantity_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Step 2: Saves quantity and displays dynamic crypto amounts based on live prices."""
+    """Step 2: Saves quantity and displays dynamic crypto amounts calculated from live rates."""
     query = update.callback_query
     await query.answer()
     
@@ -142,28 +150,31 @@ async def quantity_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["quantity"] = qty
     context.user_data["total_usd"] = total_usd
     
-    # Fetch live exchange rates
-    ltc_rate, sol_rate = get_live_prices()
+    # Fetch Live Market Rates
+    ltc_rate = get_crypto_price("LTC")
+    sol_rate = get_crypto_price("SOL")
     
-    # Calculate crypto amounts
-    if ltc_rate and sol_rate:
+    # Format Litecoin Line
+    if ltc_rate:
         ltc_amount = total_usd / ltc_rate
-        sol_amount = total_usd / sol_rate
-        
-        ltc_text = f"🪙 *Litecoin (LTC):* Send `{ltc_amount:.4f} LTC` (~${total_usd:.2f})\n`{LTC_WALLET}`"
-        sol_text = f"🪙 *Solana (SOL):* Send `{sol_amount:.4f} SOL` (~${total_usd:.2f})\n`{SOL_WALLET}`"
+        ltc_line = f"🪙 *Litecoin (LTC):* Send `{ltc_amount:.4f} LTC` (~${total_usd:.2f})\n`{LTC_WALLET}`"
     else:
-        # Fallback if API is temporarily unreachable
-        ltc_text = f"🪙 *Litecoin (LTC):*\n`{LTC_WALLET}`"
-        sol_text = f"🪙 *Solana (SOL):*\n`{SOL_WALLET}`"
+        ltc_line = f"🪙 *Litecoin (LTC):*\n`{LTC_WALLET}`"
+
+    # Format Solana Line
+    if sol_rate:
+        sol_amount = total_usd / sol_rate
+        sol_line = f"🪙 *Solana (SOL):* Send `{sol_amount:.4f} SOL` (~${total_usd:.2f})\n`{SOL_WALLET}`"
+    else:
+        sol_line = f"🪙 *Solana (SOL):*\n`{SOL_WALLET}`"
 
     text = (
         f"⚡ *Checkout - Step 2/2 (Payment)*\n\n"
         f"• *Quantity:* {qty} Account(s)\n"
         f"• *Total Due:* **${total_usd:.2f} USD**\n\n"
         f"Please transfer your calculated crypto amount to one of the wallets below:\n\n"
-        f"{ltc_text}\n\n"
-        f"{sol_text}\n\n"
+        f"{ltc_line}\n\n"
+        f"{sol_line}\n\n"
         f"⚠️ *Note:* Tap any address or crypto amount above to copy it instantly. After making the deposit, tap **I Have Paid** below."
     )
     
@@ -302,7 +313,7 @@ def main():
     
     app.add_handler(buy_conv)
 
-    print("🤖 FXReplay Sales Bot with Direct Admin Dispatch Online...")
+    print("🤖 FXReplay Sales Bot with Real-time Crypto Calculations Online...")
     app.run_polling()
 
 if __name__ == "__main__":
